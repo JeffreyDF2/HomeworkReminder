@@ -1,0 +1,49 @@
+CREATE TABLE Users (
+    UserContact VARCHAR(50),
+    FirstName VARCHAR(50),
+    LastName VARCHAR(50),
+    InternetProvider VARCHAR(20),
+    PRIMARY KEY(UserContact)
+);
+CREATE TABLE Courses (
+    Section VARCHAR(50),
+    Semester VARCHAR(20),
+    Year INTEGER,
+    CourseTitle VARCHAR(200),
+    PRIMARY KEY(Section, Semester, Year),
+);
+CREATE TABLE Enrollments (
+    UserContact VARCHAR(50),
+    Section VARCHAR(50),
+    Semester VARCHAR(20),
+    Year INTEGER,
+    PRIMARY KEY(UserContact, Section, Semester, Year),
+    FOREIGN KEY (UserContact) REFERENCES Users(UserContact),
+    FOREIGN KEY(Section, Semester, Year) REFERENCES Courses(Section, Semester, Year)
+);
+CREATE TABLE Assignments (
+    assignmentTitle VARCHAR(100),
+    assignmentDate DATE,
+    assignmentTime VARCHAR(50),
+    assignmentStatus VARCHAR(20),
+    courseSection VARCHAR(50),
+    PRIMARY KEY(assignmentTitle, courseSection),
+);
+CREATE TABLE UserAssignments (
+    assignmentTitle VARCHAR(100),
+    UserContact VARCHAR(50),
+    PRIMARY KEY(assignmentTitle, UserContact),
+    FOREIGN KEY (UserContact) REFERENCES Users(UserContact)
+);
+
+CREATE VIEW AssignmentView AS
+SELECT Assignments.assignmentTitle, Assignments.assignmentDate, Assignments.assignmentTime, Assignments.assignmentStatus, Courses.CourseTitle, UserAssignments.UserContact
+FROM Assignments
+JOIN Courses ON Assignments.courseSection = Courses.Section
+JOIN UserAssignments ON Assignments.assignmentTitle = UserAssignments.assignmentTitle
+;
+CREATE VIEW EnrollmentView AS
+SELECT Users.UserContact, Users.FirstName, Users.LastName, Courses.CourseTitle, Courses.Semester, Courses.Year
+FROM Users
+JOIN Enrollments ON Users.UserContact = Enrollments.UserContact
+JOIN Courses ON Enrollments.Section = Courses.Section AND Enrollments.Semester = Courses.Semester AND Enrollments.Year = Courses.Year
