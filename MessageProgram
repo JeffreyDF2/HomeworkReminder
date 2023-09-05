@@ -1,0 +1,302 @@
+using System;
+using System.Net.Mail;
+using System.Data.SqlClient;
+using System.Net;
+using Twilio;
+using Twilio.Rest.Api.V2010.Account;
+using System.Threading;
+
+
+public class Program
+{
+    public static void Main()
+    {
+        Timer dailyTimer = new Timer(TimerCallback1, null, 0, 86400000);
+
+        Timer weeklyTimer = new Timer(TimerCallback2, null, 0, 604800000);
+
+        Console.WriteLine("Press any key to exit.");
+        Console.ReadKey();
+    }
+
+    private static void TimerCallback1(Object o)
+    {
+        // connects to the database and sends the correct message to each user individually for daily messages.
+        Console.WriteLine("start");
+        string connectionString = "Insert connection string to your database here;";
+        using (SqlConnection connection = new SqlConnection(connectionString))
+        {
+            connection.Open();
+            string getNumbers = "SELECT UserContact, FirstName, LastName, InternetProvider FROM Users";
+            using (SqlCommand command = new SqlCommand(getNumbers, connection))
+            {
+                using (SqlDataReader reader = command.ExecuteReader())
+                {
+                    while (reader.Read())
+                    {
+                        string assignmentName = reader.GetString(1);
+                        string UserContact = reader.GetString(0);
+                        string FirstName = reader.GetString(1);
+                        string LastName = reader.GetString(2);
+                        string provider = reader.GetString(3);
+                        TextAssignments x = new TextAssignments(UserContact, FirstName, LastName, provider);
+                        x.sendMessage("1");
+                    }
+                }
+
+            }
+            connection.Close();
+        }
+    }
+
+    private static void TimerCallback2(Object o)
+    {
+        // connects to the database and sends the correct message to each user individually for weekly messages.
+        Console.WriteLine("start");
+        string connectionString = "Insert connection string to your database here;";
+        using (SqlConnection connection = new SqlConnection(connectionString))
+        {
+            connection.Open();
+            string getNumbers = "SELECT UserContact, FirstName, LastName, InternetProvider FROM Users";
+            using (SqlCommand command = new SqlCommand(getNumbers, connection))
+            {
+                using (SqlDataReader reader = command.ExecuteReader())
+                {
+                    while (reader.Read())
+                    {
+                        string assignmentName = reader.GetString(1);
+                        string UserContact = reader.GetString(0);
+                        string FirstName = reader.GetString(1);
+                        string LastName = reader.GetString(2);
+                        string provider = reader.GetString(3);
+                        TextAssignments x = new TextAssignments(UserContact, FirstName, LastName, provider);
+                        x.sendMessage("2");
+                    }
+                }
+
+            }
+            connection.Close();
+        }
+    }
+
+    public class TextAssignments
+    {
+        private string UserContact;
+        private string firstName;
+        private string lastName;
+        private string internetProvider;
+
+        // global variables for the class that are modified into the body of the message that will be send
+        private string weeklymessage = "";
+        private string dailymessage = "";
+
+
+        public TextAssignments(string contact, string fName, string lName, string provider)
+        {
+            UserContact = contact;
+            firstName = fName;
+            lastName = lName;
+            internetProvider = provider;
+        }
+
+        public string getBody(string bodytype)
+        {
+            //creates the body for the message
+            weeklymessage += $"Hello {firstName} {lastName}, here is your weekly summary: \n";
+            dailymessage += $"Hello {firstName} {lastName}, here is your daily summary: \n";
+
+            string connectionString = "Insert connection string to your database here;";
+            using (SqlConnection connection = new SqlConnection(connectionString))
+            {
+                List<string> sections = new List<string>();
+                List<string> courseTitles = new List<string>();
+                connection.Open();
+
+                string getCourses = $"SELECT Courses.Section, Courses.CourseTitle FROM Enrollments, Courses WHERE UserContact = '{UserContact}' AND Courses.Section = Enrollments.Section";
+                using (SqlCommand getCourseCommand = new SqlCommand(getCourses, connection))
+                {
+                    using (SqlDataReader reader = getCourseCommand.ExecuteReader())
+                    {
+                        while (reader.Read())
+                        {
+                            sections.Add(reader.GetString(0));
+                            courseTitles.Add(reader.GetString(1));
+                            weeklymessage += "--------------------------------\n" + $"Class: {reader.GetString(1)}({reader.GetString(0)})\n";
+                            dailymessage += "--------------------------------\n" + $"Class: {reader.GetString(1)}({reader.GetString(0)})\n";
+                            getAssignments(reader.GetString(0));
+                        }
+                    }
+                }
+                connection.Close();
+            }
+            
+            if(bodytype == "1")
+            {
+                return dailymessage;
+            }
+            else
+            {
+                return weeklymessage;
+            }
+        }
+      
+        private void getAssignments(string section)
+        {
+            // gets the assignments for the user based on the section
+            List<string> assignmentStuff = new List<string>();
+            DateTime currentDate = DateTime.Now;
+
+            string connectionString = "Insert connection string to your database here;";
+            using (SqlConnection connection = new SqlConnection(connectionString))
+            {
+                connection.Open();
+                string getAssignments = "SELECT Assignments.assignmentTitle, Assignments.assignmentDate, Assignments.assignmentTime " +
+                                        "FROM UserAssignments JOIN Assignments ON UserAssignments.assignmentTitle = Assignments.assignmentTitle " +
+                                        "JOIN Courses ON Assignments.courseSection = Courses.Section " +
+                                        $"WHERE UserAssignments.UserContact = '{UserContact}' AND Courses.Section = '{section}' AND Assignments.assignmentStatus = 'incomplete'";
+                using (SqlCommand getAssignmentsCommand = new SqlCommand(getAssignments, connection))
+                {
+                    using (SqlDataReader reader2 = getAssignmentsCommand.ExecuteReader())
+                    {
+                        while (reader2.Read())
+                        {
+                            assignmentStuff.Add(reader2.GetString(0));
+                            assignmentStuff.Add(reader2.GetDateTime(1).ToString("yyyy-MM-dd)"));
+                            assignmentStuff.Add(reader2.GetString(2));
+                            TimeSpan dateDifference = reader2.GetDateTime(1) - currentDate;
+                            if (dateDifference.TotalDays < 8)
+                            {
+                                weeklymessage += $"Assignment: {reader2.GetString(0)}\n" +
+                                                 $"Due {reader2.GetDateTime(1)} at {reader2.GetString(2)}\n" +
+                                                 "------\n";
+                            }
+                            if (dateDifference.TotalDays < 2)
+                            {
+                                dailymessage += $"Assignment: {reader2.GetString(0)}\n" +
+                                                $"Due {reader2.GetDateTime(1)} at {reader2.GetString(2)}\n" +
+                                                "------\n";
+                            }
+                        }
+                    }
+                }
+                connection.Close();
+            }
+        }
+
+        private string getProvider()
+        {
+            // gets the email ending for the internet provider
+            if (UserContact.Contains("@"))
+            {
+                internetProvider = "";
+            }
+
+            switch (internetProvider.ToLower())
+            {
+                case "at&t":
+                    return "@txt.att.net";
+                case "comcast":
+                    return "@comcast.net";
+                case "verizon":
+                    return "@vtext.com";
+                case "charter":
+                    return "@charter.net";
+                case "cox":
+                    return "@cox.net";
+                case "optimum":
+                    return "@optonline.net";
+                case "time warner":
+                    return "@twc.com";
+                case "centurylink":
+                    return "@centurylink.net";
+                case "windstream":
+                    return "@windstream.net";
+                case "frontier":
+                    return "@frontier.com";
+                default:
+                    return "";
+            }
+        }
+
+        public void sendMessage(string bodytype)
+        {
+            //sends the message via email
+            refreshDataBase();
+            SmtpClient client = new SmtpClient("Add your needed email information here");
+            client.EnableSsl = true;
+            client.UseDefaultCredentials = false;
+            client.Credentials = new NetworkCredential("Insert credentials for email here");
+
+            // Create the email message
+            MailMessage message = new MailMessage();
+            message.From = new MailAddress("Your email here");
+            Console.WriteLine(UserContact);
+            Console.WriteLine(getProvider());
+            message.To.Add($"{UserContact}{getProvider()}");
+            message.Subject = "Homework Reminder";
+            message.Body = getBody(bodytype);
+
+            // Send the email
+            try
+            {
+                client.Send(message);
+                Console.WriteLine("Email sent successfully.");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("Error sending email: " + ex.Message);
+            }
+
+            //Code that should work will twillio if i eventually pay for it
+            //const string accountSid = "your accountSid";
+            //const string authToken = "your accountToken";
+            //TwilioClient.Init(accountSid, authToken);
+            //var message = MessageResource.Create(
+            //    body: getBody(),
+            //    from: new Twilio.Types.PhoneNumber("your Phone #"),
+            //    to: new Twilio.Types.PhoneNumber("receivers phone #")
+            //);
+
+            //Console.WriteLine(message.Sid);
+
+
+
+        }
+
+        private void refreshDataBase()
+        {
+            //This code checks if the due date has passed and changes the status of the assignment to complete
+            string connectionString = "Insert connection string to your database here;";
+            using (SqlConnection connection = new SqlConnection(connectionString))
+            {
+                connection.Open();
+
+                DateTime currentDate = DateTime.Now;
+                List<string> pastAssignmentTitle = new List<string>();
+
+                string selectQuery = $"SELECT * FROM Assignments WHERE assignmentDate < '{currentDate}'";
+
+                using (SqlCommand command = new SqlCommand(selectQuery, connection))
+                {
+                    using (SqlDataReader reader = command.ExecuteReader())
+                    {
+                        while (reader.Read())
+                        {
+                            string assignmentName = reader.GetString(0);
+                            pastAssignmentTitle.Add(assignmentName);
+
+                            DateTime assignmentDate = reader.GetDateTime(1);
+                            string assignmentTime = reader.GetString(2);
+                        }
+                    }
+                }
+                foreach (string assignment in pastAssignmentTitle)
+                {
+                    string updateQuery = $"UPDATE Assignments SET assignmentStatus='complete' WHERE assignmentTitle='{assignment}'";
+                    SqlCommand updateCommand = new SqlCommand(updateQuery, connection);
+                    updateCommand.ExecuteNonQuery();
+                }
+            }
+        }
+    }
+}
