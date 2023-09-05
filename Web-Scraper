@@ -1,0 +1,282 @@
+// Jeffrey Filiberto
+using System;
+using System.Xml;
+using OpenQA.Selenium;
+using OpenQA.Selenium.Chrome;
+using System.Data.SqlClient;
+using System.Collections.Generic;
+using OpenQA.Selenium.Support.UI;
+using AngleSharp.Dom;
+using System.Globalization;
+using System.Collections;
+using System.Data;
+using System.Threading;
+
+public class Program
+{
+    private static string userFirstName = "";
+    private static string userLastName = "";
+    private static string UserContact = "";
+    private static string internetProvider = "";
+    private static string userPassword = "";
+    private static string userName = "";
+
+    public static void Main(string[] args)
+    {
+        Console.WriteLine("Start");
+
+        userFirstName = args[0];
+        userLastName = args[1];
+        UserContact = args[2];
+        internetProvider = args[3];
+        userPassword = args[4];
+        userName = args[5];
+
+        Timer dailyTimer = new Timer(TimerCallback, null, 0, 480000);
+        Console.WriteLine("Press any key to exit.");
+        Console.ReadKey();
+    }
+
+
+    private static void TimerCallback(Object o)
+    {
+        // Makes the webscraper run every 4 hours
+        Console.WriteLine("start again");
+        eClassWebDriver test = new eClassWebDriver(userFirstName, userLastName, UserContact, internetProvider, userPassword, userName);
+        test.getAllAssignments();
+    }
+}
+public class eClassWebDriver
+{
+    //class variable for all methods of the current browser session.
+    IWebDriver browser = new ChromeDriver();
+    //class variables for a list of classes, assignments, due dates, due times
+    List<string> classes = new List<string>();
+    List<string> assignmentsList = new List<string>();
+    List<DateTime> dueDatesList = new List<DateTime>();
+
+    private string userFirstName;
+    private string userLastName;
+    private string UserContact;
+    private string internetProvider;
+    private string userPassword;
+    private string userName;
+
+    public eClassWebDriver(string firstName, string lastName, string contact, string provider, string password, string username)
+    {
+        userFirstName = firstName;
+        userLastName = lastName;
+        UserContact = contact;
+        internetProvider = provider;
+        userPassword = password;
+        userName = username;
+    }
+
+    private void eclassLogin()
+    {
+        browser.Navigate().GoToUrl("https://eclass.e.southern.edu/login/index.php");
+
+        IWebElement userName = browser.FindElement(By.Id("username"));
+        IWebElement passWord = browser.FindElement(By.Id("password"));
+
+        userName.SendKeys(this.userName);
+        passWord.SendKeys(this.userPassword + Keys.Enter);
+        Thread.Sleep(5000);
+    }
+
+    private void expandAll()
+    {
+        // Clicks on show more courses until button can't be found.
+        while (true)
+        {
+            try
+            {
+                IWebElement courseButton = browser.FindElement(By.CssSelector(".btn.btn-primary"));
+                courseButton.Click();
+                Thread.Sleep(3000);
+            }
+            catch (OpenQA.Selenium.ElementNotInteractableException)
+            {
+                break;
+            }
+        }
+        // Expands assignment until button can't be found.
+        while (true)
+        {
+            try
+            {
+                IWebElement activityButton = browser.FindElement(By.CssSelector(".btn.btn-secondary.btn-sm"));
+                activityButton.Click();
+                Thread.Sleep(2000);
+            }
+            catch (OpenQA.Selenium.NoSuchElementException)
+            {
+                break;
+            }
+        }
+    }
+
+    public void getAllAssignments()
+    {
+        addToUsers();
+        eclassLogin();
+        expandAll();
+
+        IReadOnlyCollection<IWebElement> courseBlocks = browser.FindElements(By.CssSelector("[data-region='course-events-container']"));
+        foreach (IWebElement courseBlock in courseBlocks)
+        {
+            var courseTitle = courseBlock.FindElement(By.CssSelector(".h5.font-weight-bold"));
+            addToCoursesAndEnrollment(courseTitle.Text);
+
+            IReadOnlyCollection<IWebElement> assignments = courseBlock.FindElements(By.CssSelector("[data-region=\"event-list-item\"]"));
+            foreach (IWebElement assignment in assignments)
+            {
+                IWebElement assignmentInfo = assignment.FindElement(By.CssSelector(".event-name.mb-0.pb-1.text-truncate"));
+                addAssignmetnsandUserAssignments(courseTitle.Text, assignmentInfo);
+            }
+        }
+        browser.Quit();
+    }
+
+    private void addAssignmetnsandUserAssignments(string courseStuff, IWebElement assignmentStuff)
+    {
+        // Adds the to the assignments and userassignments tables.
+        string dueDate = assignmentStuff.FindElement(By.TagName("a")).GetAttribute("aria-label");
+        var assignmentName = assignmentStuff.Text;
+
+        // extracting duedate and assignment title
+        string[] parts = dueDate.Split(new string[] { "is due on " }, StringSplitOptions.RemoveEmptyEntries);
+        string datePart = parts[1];
+        string[] dateAndTime = datePart.Split(new char[] { ',' }, StringSplitOptions.RemoveEmptyEntries);
+        DateTime datetime = DateTime.ParseExact(datePart, "MMMM d yyyy, h:mm tt", CultureInfo.InvariantCulture);
+
+        int startIndex = courseStuff.IndexOf("(") + 1;
+        int endIndex = courseStuff.IndexOf(")") - startIndex;
+        string section = courseStuff.Substring(startIndex, endIndex).Trim();
+
+
+        string assignmentStatement = "INSERT INTO Assignments (assignmentTitle, assignmentDate, assignmentTime, assignmentStatus, courseSection) " +
+                                 "SELECT @Title, @Date, @Time, @Status, @Section " +
+                                 "WHERE NOT EXISTS (SELECT 1 FROM Assignments WHERE assignmentTitle=@Title AND courseSection=@Section)";
+
+        string userAssignmentsStatement = "INSERT INTO UserAssignments(assignmentTitle, UserContact) " +
+                                              "SELECT @Title, @UserContact " +
+                                              "WHERE NOT EXISTS (SELECT 1 FROM UserAssignments WHERE assignmentTitle=@Title AND UserContact=@UserContact)";
+
+        string connectionString = "Insert you databse connection string";
+        using (SqlConnection connection = new SqlConnection(connectionString))
+        {
+            connection.Open();
+
+            Console.WriteLine(assignmentName);
+            Console.WriteLine(datetime.Date);
+            Console.WriteLine(datetime.ToString("hh:mm tt"));
+            Console.WriteLine(section);
+            using (SqlCommand assignmentCommand = new SqlCommand(assignmentStatement, connection))
+            {
+                Console.WriteLine();
+                assignmentCommand.Parameters.AddWithValue("@Title", assignmentName);
+                assignmentCommand.Parameters.AddWithValue("@Date", datetime.Date);
+                assignmentCommand.Parameters.AddWithValue("@Time", datetime.ToString("hh:mm tt"));
+                assignmentCommand.Parameters.AddWithValue("@Status", "incomplete");
+                assignmentCommand.Parameters.AddWithValue("@Section", section);
+                assignmentCommand.ExecuteNonQuery();
+            }
+
+            Console.WriteLine(assignmentName);
+            Console.WriteLine(UserContact);
+            using (SqlCommand userAssignmentsCommand = new SqlCommand(userAssignmentsStatement, connection))
+            {
+                userAssignmentsCommand.Parameters.AddWithValue("@Title", assignmentName);
+                userAssignmentsCommand.Parameters.AddWithValue("@UserContact", UserContact);
+                userAssignmentsCommand.ExecuteNonQuery();
+            }
+
+            connection.Close();
+        }
+
+    }
+
+    private void addToCoursesAndEnrollment(string classStuff)
+    {
+        //Add to the Course and Enrollment tables
+        string coursesStatement = "INSERT INTO Courses(Section, Semester, Year, CourseTitle) " +
+                                          "SELECT @Section, @Semester, @Year, @CourseTitle " +
+                                          "WHERE NOT EXISTS (SELECT 1 FROM Courses WHERE Section=@Section AND Semester=@Semester AND Year=@Year AND CourseTitle=@CourseTitle)";
+        string enrollmentsStatement = "INSERT INTO Enrollments(UserContact, Section, Semester, Year)" +
+                                      "SELECT @UserContact, @Section, @Semester, @Year " +
+                                      "WHERE NOT EXISTS (SELECT 1 FROM Enrollments WHERE UserContact=@UserContact AND Section=@Section AND Semester=@Semester AND Year=@Year)";
+        // Extract semeser and year
+        string semester = classStuff.Substring(0, 1);
+        string year = "20" + classStuff.Substring(1, 2);
+
+        // Extract title
+        int startIndex = classStuff.IndexOf(" ") + 1;
+        int endIndex = classStuff.IndexOf("(") - startIndex;
+        string title = classStuff.Substring(startIndex, endIndex).Trim();
+
+        // Extract section
+        startIndex = classStuff.IndexOf("(") + 1;
+        endIndex = classStuff.IndexOf(")") - startIndex;
+        string section = classStuff.Substring(startIndex, endIndex).Trim();
+        string connectionString = "Insert you databse connection string";
+        using (SqlConnection connection = new SqlConnection(connectionString))
+        {
+            connection.Open();
+
+            Console.WriteLine(section);
+            Console.WriteLine(semester);
+            Console.WriteLine(int.Parse(year));
+            Console.WriteLine(title);
+            using (SqlCommand courseCommand = new SqlCommand(coursesStatement, connection))
+            {
+                courseCommand.Parameters.AddWithValue("@Section", section);
+                courseCommand.Parameters.AddWithValue("@Semester", semester);
+                courseCommand.Parameters.AddWithValue("@Year", int.Parse(year));
+                courseCommand.Parameters.AddWithValue("@CourseTitle", title);
+                courseCommand.ExecuteNonQuery();
+            }
+
+            Console.WriteLine(UserContact);
+            Console.WriteLine(section);
+            Console.WriteLine(semester);
+            Console.WriteLine(int.Parse(year));
+            using (SqlCommand enrollmentCommand = new SqlCommand(enrollmentsStatement, connection))
+            {
+                enrollmentCommand.Parameters.AddWithValue("@UserContact", UserContact);
+                enrollmentCommand.Parameters.AddWithValue("@Section", section);
+                enrollmentCommand.Parameters.AddWithValue("@Semester", semester);
+                enrollmentCommand.Parameters.AddWithValue("@Year", int.Parse(year));
+                enrollmentCommand.ExecuteNonQuery();
+            }
+
+            connection.Close();
+        }
+
+
+    }
+
+    private void addToUsers()
+    {
+        // Adds the users data to the database
+        string connectionString = "Insert you databse connection string";
+        using (SqlConnection connection = new SqlConnection(connectionString))
+        {
+            connection.Open();
+            string usersStatement = "INSERT INTO Users (UserContact, FirstName, LastName, InternetProvider) " +
+                        "SELECT @UserContact, @FirstName, @LastName, @InternetProvider " +
+                        "WHERE NOT EXISTS (SELECT 1 FROM Users WHERE UserContact=@UserContact)";
+
+            using (SqlCommand userCommand = new SqlCommand(usersStatement, connection))
+            {
+                userCommand.Parameters.AddWithValue("@UserContact", UserContact);
+                userCommand.Parameters.AddWithValue("@FirstName", userFirstName);
+                userCommand.Parameters.AddWithValue("@LastName", userLastName);
+                userCommand.Parameters.AddWithValue("@InternetProvider", internetProvider);
+
+                userCommand.ExecuteNonQuery();
+            }
+            connection.Close();
+        }
+    }
+}
